@@ -6,11 +6,11 @@ export default function Footer() {
       <div className="max-w-7xl mx-auto px-5 sm:px-6">
         {/* Mega wordmark */}
         <div className="text-center mb-14">
-          <h2 className="font-display text-[18vw] sm:text-[14vw] lg:text-[11vw] leading-[0.9] font-light text-ink-50/90">
+          <h2 className="font-display text-[14vw] sm:text-[12vw] lg:text-[10vw] leading-[1.05] font-light text-ink-50/90 pb-2">
             cardjoy
             <span className="italic text-gradient">bday</span>
           </h2>
-          <p className="mt-2 text-ink-400 text-sm tracking-wide">
+          <p className="mt-4 sm:mt-5 text-ink-400 text-sm tracking-wide max-w-md mx-auto px-4">
             Birthday wishes, signed by friends, kept by the chain.
           </p>
         </div>

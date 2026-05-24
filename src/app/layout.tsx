@@ -1,37 +1,48 @@
 import type { Metadata } from "next";
-import { Quicksand, Fredoka } from "next/font/google";
+import { Fraunces, Plus_Jakarta_Sans, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
+import { Providers } from "./providers";
 
-const roundedSans = Quicksand({
+const fraunces = Fraunces({
   subsets: ["latin"],
-  variable: "--font-rounded-sans",
-  weight: ["400", "500", "600", "700"],
+  variable: "--font-display",
+  weight: ["300", "400", "500", "600", "700", "900"],
+  style: ["normal", "italic"],
+  display: "swap",
 });
 
-const playfulBold = Fredoka({
+const jakarta = Plus_Jakarta_Sans({
   subsets: ["latin"],
-  variable: "--font-playful-bold",
-  weight: ["600", "700"],
+  variable: "--font-sans",
+  weight: ["300", "400", "500", "600", "700"],
+  display: "swap",
+});
+
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ["latin"],
+  variable: "--font-mono",
+  weight: ["400", "500"],
+  display: "swap",
 });
 
 export const metadata: Metadata = {
-  title: "cardjoybday | Joyful Birthday Wishes, Built Together",
-  description: "Create interactive, collaborative birthday cards powered by Sui & Walrus.",
+  title: "cardjoybday — Birthday wishes, forever on-chain",
+  description:
+    "Collaborative AI birthday cards stored permanently on Sui & Walrus.",
 };
-
-import { Providers } from "./providers";
 
 export default function RootLayout({
   children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+}: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" className="scroll-smooth">
-      <body className={`${roundedSans.variable} ${playfulBold.variable} font-sans bg-brand-cream text-slate-800 antialiased`}>
-        <Providers>
-          {children}
-        </Providers>
+    <html
+      lang="en"
+      className={`scroll-smooth ${fraunces.variable} ${jakarta.variable} ${jetbrainsMono.variable}`}
+    >
+      <body className="font-sans bg-ink-950 text-ink-50 antialiased min-h-screen">
+        <div className="aurora-bg" aria-hidden />
+        <div className="noise-overlay" aria-hidden />
+        <Providers>{children}</Providers>
       </body>
     </html>
   );

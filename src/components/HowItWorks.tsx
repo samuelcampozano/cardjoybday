@@ -1,57 +1,85 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Upload, Palette, Users } from "lucide-react";
+import { Sparkles, Image as ImageIcon, Users } from "lucide-react";
 
 const steps = [
   {
-    title: "Upload Memories",
-    description: "Drag and drop your favorite photos, videos, and voice notes. They're safely stored forever on Walrus.",
-    icon: <Upload className="w-8 h-8 text-brand-blue" />,
-    color: "bg-blue-50",
+    n: "01",
+    title: "Spin up a plan",
+    body: "Connect your wallet and create a shared Sui object for the birthday person. You get a single invite link to share with everyone.",
+    icon: Sparkles,
+    accent: "from-ember to-rosegold",
   },
   {
-    title: "Decorate & Animate",
-    description: "Choose from hand-drawn themes, interactive candles, and background tunes that fit their personality.",
-    icon: <Palette className="w-8 h-8 text-brand-pink" />,
-    color: "bg-pink-50",
+    n: "02",
+    title: "Friends drop ideas",
+    body: "Each contributor writes a wish, generates a free AI collage from it, and signs it into the plan — permanently stored on Walrus.",
+    icon: ImageIcon,
+    accent: "from-rosegold to-iris",
   },
   {
-    title: "Collaborate Together",
-    description: "The Surprise Planner lets friends suggest gift ideas and favorite memories to build a collective masterpiece.",
-    icon: <Users className="w-8 h-8 text-brand-teal" />,
-    color: "bg-teal-50",
+    n: "03",
+    title: "Reveal together",
+    body: "On the big day, open the plan link and watch every wish bloom in a single shared canvas. Nothing to download. Nothing to lose.",
+    icon: Users,
+    accent: "from-iris to-sungold",
   },
 ];
 
 export default function HowItWorks() {
   return (
-    <section id="how-it-works" className="py-24 bg-white">
-      <div className="max-w-7xl mx-auto px-6">
-        <div className="text-center mb-20">
-          <h2 className="font-heading text-4xl md:text-5xl font-bold mb-4">Making magic is easy</h2>
-          <p className="text-slate-500 text-lg">Three steps to the best birthday gift they've ever received.</p>
+    <section
+      id="how-it-works"
+      className="relative py-24 sm:py-32 border-t border-white/[0.06]"
+    >
+      <div className="max-w-7xl mx-auto px-5 sm:px-6">
+        <div className="text-center mb-16 sm:mb-24">
+          <p className="eyebrow mb-4">The flow</p>
+          <h2 className="font-display text-4xl sm:text-5xl md:text-6xl font-medium text-ink-50 leading-[1.05] max-w-3xl mx-auto">
+            Three signatures.
+            <br />
+            <span className="italic font-light text-gradient">One unforgettable moment.</span>
+          </h2>
         </div>
 
-        <div className="grid md:grid-cols-3 gap-12">
-          {steps.map((step, index) => (
-            <motion.div
-              key={index}
-              initial={{ opacity: 0, y: 20 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              transition={{ delay: index * 0.2 }}
-              className="flex flex-col items-center text-center p-8 rounded-[2.5rem] hover:bg-slate-50 transition-colors"
-            >
-              <div className={`w-20 h-20 ${step.color} rounded-3xl flex items-center justify-center mb-8 shadow-sm`}>
-                {step.icon}
-              </div>
-              <h3 className="font-heading text-2xl font-bold mb-4">{step.title}</h3>
-              <p className="text-slate-600 leading-relaxed">
-                {step.description}
-              </p>
-            </motion.div>
-          ))}
+        <div className="grid md:grid-cols-3 gap-5 sm:gap-6">
+          {steps.map((step, i) => {
+            const Icon = step.icon;
+            return (
+              <motion.article
+                key={i}
+                initial={{ opacity: 0, y: 24 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true, margin: "-80px" }}
+                transition={{ delay: i * 0.12, duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
+                className="group relative rounded-3xl glass-card p-7 sm:p-8 overflow-hidden"
+              >
+                {/* Hover gradient wash */}
+                <div
+                  className={`absolute -inset-px rounded-3xl bg-gradient-to-br ${step.accent} opacity-0 group-hover:opacity-[0.08] transition-opacity duration-500`}
+                />
+                {/* Step number */}
+                <div className="relative flex items-start justify-between mb-12">
+                  <span className="font-display text-6xl sm:text-7xl font-light text-ink-700 leading-none tabular-nums">
+                    {step.n}
+                  </span>
+                  <span
+                    className={`p-2.5 rounded-xl bg-gradient-to-br ${step.accent} shadow-soft-card`}
+                  >
+                    <Icon className="w-5 h-5 text-ink-50" />
+                  </span>
+                </div>
+
+                <h3 className="font-display text-2xl sm:text-3xl text-ink-50 mb-3 leading-tight">
+                  {step.title}
+                </h3>
+                <p className="text-ink-300 text-[0.95rem] leading-relaxed">
+                  {step.body}
+                </p>
+              </motion.article>
+            );
+          })}
         </div>
       </div>
     </section>

@@ -18,12 +18,6 @@ const pillars = [
     body: "AI-generated images are uploaded to Walrus testnet as decentralized blobs. The blob ID is what we store on Sui — so the picture outlives any server.",
     accent: "from-ember to-rosegold",
   },
-  {
-    letter: "P",
-    name: "Pollinations FLUX",
-    body: "Free image generation, no API key, no rate limit. Powered by FLUX.1-schnell — sized 1024×1024 and pinned to the user’s wallet-signed wish.",
-    accent: "from-sungold to-ember",
-  },
 ];
 
 const code = `// surprise_planner.move

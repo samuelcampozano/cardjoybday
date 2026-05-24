@@ -153,7 +153,7 @@ export default function PlanView({ planId }: { planId: string }) {
       const result = await signTx(payTx);
       digest = result.digest;
       setPaymentDigest(digest);
-      setMsg("Payment received. Generating your collage with FLUX…");
+      setMsg("Payment received. Generating your collage…");
     } catch (err: any) {
       setMsg(
         err?.message?.includes("Reject")

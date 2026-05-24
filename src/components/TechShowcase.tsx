@@ -21,17 +21,17 @@ const pillars = [
 ];
 
 const code = `// surprise_planner.move
-public entry fun add_idea(
+public entry fun add_wish(
     plan: &mut SurprisePlan,
     text: String,
-    blob_id: String,
     ctx: &mut TxContext
 ) {
+    assert!(!plan.is_finalized, ENotEditable);
     let contributor = tx_context::sender(ctx);
-    plan.ideas.push_back(Idea {
-        contributor, text, blob_id
+    plan.wishes.push_back(Wish {
+        contributor, text
     });
-    event::emit(IdeaAdded {
+    event::emit(WishAdded {
         plan_id: object::id(plan),
         contributor,
     });
@@ -144,11 +144,11 @@ function highlightMove(src: string): string {
     '<span style="color:#FF6B5C">$1</span>'
   );
   out = out.replace(
-    /\b(plan|text|blob_id|ctx|contributor|plan_id)\b/g,
+    /\b(plan|text|ctx|contributor|plan_id)\b/g,
     '<span style="color:#9B6FFF">$1</span>'
   );
   out = out.replace(
-    /(String|TxContext|SurprisePlan|Idea|IdeaAdded)/g,
+    /(String|TxContext|SurprisePlan|Wish|WishAdded|ENotEditable)/g,
     '<span style="color:#F5C572">$1</span>'
   );
   return out;

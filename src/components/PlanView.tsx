@@ -9,41 +9,44 @@ import {
   useSuiClientQuery,
 } from "@mysten/dapp-kit";
 import { Transaction } from "@mysten/sui/transactions";
-import { uploadToWalrus, fetchImageAsBlob, walrusBlobUrl } from "@/lib/walrus";
 import { config } from "@/lib/config";
+import { walrusBlobUrl } from "@/lib/walrus";
 import {
   Copy,
   Check,
   RefreshCw,
   Sparkles,
   ExternalLink,
-  ImagePlus,
   ShieldCheck,
   Wallet,
-  Wand2,
-  Users,
+  Crown,
+  Gift,
   Loader2,
+  MessageCircle,
+  Wand2,
+  Send,
 } from "lucide-react";
 
 const FEE_SUI = Number(config.sui.feeMist) / 1_000_000_000;
 
-interface IdeaFields {
+interface WishFields {
   contributor: string;
   text: string;
-  blob_id: string;
 }
 
 interface PlanFields {
   title: string;
   creator: string;
-  ideas: Array<{ fields: IdeaFields }>;
+  recipient: string | null;
+  wishes: Array<{ fields: WishFields }>;
+  final_card_blob_id: string | null;
+  is_finalized: boolean;
 }
 
 function shortenAddress(addr: string) {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
 }
 
-// Deterministic gradient per address for contributor avatars
 function avatarGradient(addr: string) {
   const palette = [
     "from-ember to-rosegold",
@@ -60,6 +63,18 @@ function avatarGradient(addr: string) {
   return palette[hash % palette.length];
 }
 
+function extractOption<T>(opt: any): T | null {
+  if (!opt) return null;
+  if (Array.isArray(opt)) return opt.length > 0 ? opt[0] : null;
+  const vec = opt.vec ?? opt.fields?.vec;
+  if (Array.isArray(vec)) return vec.length > 0 ? vec[0] : null;
+  return null;
+}
+
+function isValidSuiAddress(addr: string) {
+  return /^0x[0-9a-fA-F]{1,64}$/.test(addr.trim());
+}
+
 export default function PlanView({ planId }: { planId: string }) {
   const account = useCurrentAccount();
   const suiClient = useSuiClient();
@@ -73,18 +88,6 @@ export default function PlanView({ planId }: { planId: string }) {
       }),
   });
 
-  const [idea, setIdea] = useState("");
-  const [generatedImageUrl, setGeneratedImageUrl] = useState<string | null>(null);
-  const [paymentDigest, setPaymentDigest] = useState<string>(""); // current receipt
-  const [isWorking, setIsWorking] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const [status, setStatus] = useState("");
-  const [statusKind, setStatusKind] = useState<"info" | "error" | "success">(
-    "info"
-  );
-  const [copied, setCopied] = useState(false);
-
-  // Live polling so friends' wishes appear automatically
   const {
     data: planData,
     isLoading,
@@ -96,27 +99,64 @@ export default function PlanView({ planId }: { planId: string }) {
     { refetchInterval: 12_000 }
   );
 
-  const content = planData?.data?.content;
-  const planFields =
-    content?.dataType === "moveObject"
-      ? (content.fields as unknown as PlanFields)
-      : null;
+  const planFields = useMemo<PlanFields | null>(() => {
+    const content = planData?.data?.content;
+    if (content?.dataType !== "moveObject") return null;
+    const f = content.fields as any;
+    return {
+      title: f.title,
+      creator: f.creator,
+      recipient: extractOption<string>(f.recipient),
+      wishes: f.wishes ?? [],
+      final_card_blob_id: extractOption<string>(f.final_card_blob_id),
+      is_finalized: !!f.is_finalized,
+    };
+  }, [planData]);
 
-  // Derived: unique contributors (including creator)
+  const isCreator =
+    !!account && !!planFields && account.address.toLowerCase() === planFields.creator.toLowerCase();
+  const isFinalized = planFields?.is_finalized ?? false;
+  const wishCount = planFields?.wishes.length ?? 0;
+
+  // ── Add-wish state ──
+  const [wishText, setWishText] = useState("");
+  const [isAddingWish, setIsAddingWish] = useState(false);
+  const [wishStatus, setWishStatus] = useState("");
+  const [wishStatusKind, setWishStatusKind] = useState<"info" | "error" | "success">("info");
+
+  // ── Finalize state ──
+  const [showFinalize, setShowFinalize] = useState(false);
+  const [recipient, setRecipient] = useState("");
+  const [finalizeStep, setFinalizeStep] = useState<
+    "idle" | "paying" | "generating" | "preview" | "sealing"
+  >("idle");
+  const [paymentDigest, setPaymentDigest] = useState("");
+  const [generatedBlobId, setGeneratedBlobId] = useState("");
+  const [generatedPreview, setGeneratedPreview] = useState("");
+  const [finalizeError, setFinalizeError] = useState("");
+
+  const [copied, setCopied] = useState(false);
+
   const contributors = useMemo(() => {
     if (!planFields) return [];
     const set = new Set<string>();
     set.add(planFields.creator);
-    for (const it of planFields.ideas) set.add(it.fields.contributor);
+    for (const w of planFields.wishes) set.add(w.fields.contributor);
     return Array.from(set);
   }, [planFields]);
 
-  const setMsg = (
-    msg: string,
-    kind: "info" | "error" | "success" = "info"
-  ) => {
-    setStatus(msg);
-    setStatusKind(kind);
+  const shareLink =
+    typeof window !== "undefined" ? window.location.href : "";
+
+  const handleCopyLink = () => {
+    navigator.clipboard.writeText(shareLink);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2500);
+  };
+
+  const setWishMsg = (msg: string, kind: "info" | "error" | "success" = "info") => {
+    setWishStatus(msg);
+    setWishStatusKind(kind);
   };
 
   // Promise wrapper around the callback-based signAndExecute
@@ -131,142 +171,119 @@ export default function PlanView({ planId }: { planId: string }) {
       );
     });
 
-  // ── Step 1+2: pay protocol fee on Sui, then ask the server to verify+generate
-  const handlePayAndGenerate = async () => {
-    if (!idea.trim() || !account) return;
-    if (isWorking) return;
+  // ── Add wish (free, anyone with a wallet) ──
+  const handleAddWish = async () => {
+    if (!wishText.trim() || !account || isAddingWish) return;
+    setIsAddingWish(true);
+    setWishMsg("Sign your wish onto Sui…");
 
-    setIsWorking(true);
-    setGeneratedImageUrl(null);
-    setPaymentDigest("");
-    setMsg(`Open your wallet to confirm ${FEE_SUI} SUI…`);
+    try {
+      const tx = new Transaction();
+      tx.moveCall({
+        target: config.sui.moveTargets.addWish,
+        arguments: [tx.object(planId), tx.pure.string(wishText.trim())],
+      });
+      await signTx(tx);
+      setWishText("");
+      setWishMsg("Wish pinned on-chain. 🎉", "success");
+      setTimeout(() => refetch(), 2000);
+    } catch (err: any) {
+      setWishMsg(
+        err?.message?.includes("Reject")
+          ? "Cancelled — your wish wasn't sent."
+          : "Failed: " + (err?.message ?? err),
+        "error"
+      );
+    } finally {
+      setIsAddingWish(false);
+    }
+  };
+
+  // ── Finalize: pay + generate composite card ──
+  const handlePayAndGenerate = async () => {
+    if (!account || !planFields || !isCreator) return;
+    if (!isValidSuiAddress(recipient)) {
+      setFinalizeError("Recipient must be a valid Sui address (0x…).");
+      return;
+    }
+    if (wishCount === 0) {
+      setFinalizeError("Wait for at least one wish before sealing the card.");
+      return;
+    }
+
+    setFinalizeError("");
+    setFinalizeStep("paying");
 
     let digest = "";
     try {
-      // 1) Sign the payment transaction
       const payTx = new Transaction();
       const [coin] = payTx.splitCoins(payTx.gas, [
         payTx.pure.u64(config.sui.feeMist),
       ]);
       payTx.transferObjects([coin], config.sui.treasuryAddress);
-
       const result = await signTx(payTx);
       digest = result.digest;
       setPaymentDigest(digest);
-      setMsg("Payment received. Generating your collage…");
     } catch (err: any) {
-      setMsg(
+      setFinalizeError(
         err?.message?.includes("Reject")
-          ? "Wallet signature cancelled — no charge."
-          : "Payment failed: " + (err?.message ?? err),
-        "error"
+          ? "Payment cancelled — no charge."
+          : "Payment failed: " + (err?.message ?? err)
       );
-      setIsWorking(false);
+      setFinalizeStep("idle");
       return;
     }
 
-    // 2) Ask the server to verify the digest and run Pollinations
+    setFinalizeStep("generating");
     try {
-      const res = await fetch("/api/generate-collage", {
+      const res = await fetch("/api/finalize-card", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: idea, paymentDigest: digest }),
+        body: JSON.stringify({
+          planTitle: planFields.title,
+          wishes: planFields.wishes.map((w) => w.fields.text),
+          paymentDigest: digest,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? `Error ${res.status}`);
-      setGeneratedImageUrl(data.imageUrl);
-      setMsg("Collage ready — review it below, then pin it to the card.", "success");
+      setGeneratedBlobId(data.blobId);
+      setGeneratedPreview(data.imageUrl);
+      setFinalizeStep("preview");
     } catch (err: any) {
-      setMsg(
+      setFinalizeError(
         "Generation failed: " +
           (err?.message ?? err) +
-          " — your payment receipt is still valid; you can retry.",
-        "error"
+          " — your payment receipt is still valid; you can retry."
       );
-    } finally {
-      setIsWorking(false);
+      setFinalizeStep("idle");
     }
   };
 
-  // Allow regeneration with the same receipt (server clears used-digest on failure,
-  // and we let the user re-try if they don't like the result)
-  const handleRegenerate = async () => {
-    if (!paymentDigest || !idea.trim()) return;
-    setIsWorking(true);
-    setGeneratedImageUrl(null);
-    setMsg("Regenerating with your existing receipt…");
-    try {
-      const res = await fetch("/api/generate-collage", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: idea, paymentDigest }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? `Error ${res.status}`);
-      setGeneratedImageUrl(data.imageUrl);
-      setMsg("New collage ready.", "success");
-    } catch (err: any) {
-      setMsg(
-        "Regeneration failed: " +
-          (err?.message ?? err) +
-          " — receipt may be consumed; pay again to try.",
-        "error"
-      );
-    } finally {
-      setIsWorking(false);
-    }
-  };
-
-  // ── Step 3: store on Walrus + add_idea on Sui (no fee bundled now)
-  const handlePinToCard = async () => {
-    if (!account || !generatedImageUrl) return;
-    setIsSaving(true);
-    setMsg("Uploading collage to Walrus…");
+  // ── Finalize: sign finalize_card transaction ──
+  const handleSealCard = async () => {
+    if (!account || !generatedBlobId || !isValidSuiAddress(recipient)) return;
+    setFinalizeStep("sealing");
+    setFinalizeError("");
 
     try {
-      const blob = await fetchImageAsBlob(generatedImageUrl);
-      const blobId = await uploadToWalrus(blob);
-      setMsg("Stored on Walrus. Sign to pin onto the card…");
-
       const tx = new Transaction();
       tx.moveCall({
-        target: config.sui.moveTargets.addIdea,
+        target: config.sui.moveTargets.finalizeCard,
         arguments: [
           tx.object(planId),
-          tx.pure.string(idea),
-          tx.pure.string(blobId),
+          tx.pure.string(generatedBlobId),
+          tx.pure.address(recipient.trim()),
         ],
       });
-
-      signAndExecute(
-        { transaction: tx },
-        {
-          onSuccess: () => {
-            setMsg("Pinned on Sui forever. 🎉", "success");
-            setIdea("");
-            setGeneratedImageUrl(null);
-            setPaymentDigest("");
-            setTimeout(() => refetch(), 2500);
-          },
-          onError: (err: any) => {
-            setMsg("Pinning failed: " + err.message, "error");
-          },
-        }
-      );
+      await signTx(tx);
+      setShowFinalize(false);
+      setFinalizeStep("idle");
+      setTimeout(() => refetch(), 2500);
     } catch (err: any) {
-      setMsg("Error: " + err.message, "error");
-    } finally {
-      setIsSaving(false);
+      setFinalizeError("Sealing failed: " + (err?.message ?? err));
+      setFinalizeStep("preview");
     }
-  };
-
-  const shareLink =
-    typeof window !== "undefined" ? window.location.href : "";
-
-  const handleCopy = () => {
-    navigator.clipboard.writeText(shareLink);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2500);
   };
 
   // ── Loading ──
@@ -289,28 +306,34 @@ export default function PlanView({ planId }: { planId: string }) {
           <span className="text-2xl">?</span>
         </div>
         <h2 className="font-display text-2xl text-ink-50">Plan not found</h2>
-        <p className="text-ink-300 text-sm max-w-sm font-mono break-all">
-          {planId}
-        </p>
+        <p className="text-ink-300 text-sm max-w-sm font-mono break-all">{planId}</p>
         <p className="text-ink-400 text-xs max-w-sm">
-          Make sure the contract is deployed on testnet and the plan was created there.
+          Make sure the contract is deployed and this plan was created on the same network.
         </p>
       </div>
     );
   }
 
-  const ideaCount = planFields.ideas.length;
+  const displayTitle = planFields.title.replace(/^Birthday Surprise for /i, "");
 
   return (
     <div className="min-h-screen pt-24 sm:pt-28 pb-24">
-      {/* ── Plan header ── */}
-      <header className="max-w-4xl mx-auto px-5 sm:px-6 mb-10 sm:mb-14">
-        <div className="flex items-center gap-2 mb-3 text-[0.7rem] uppercase tracking-[0.2em]">
-          <span className="relative flex h-2 w-2">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-ember opacity-75" />
-            <span className="relative inline-flex h-2 w-2 rounded-full bg-ember" />
-          </span>
-          <span className="text-ink-300 font-medium">Live · Sui Testnet</span>
+      {/* ── Header ── */}
+      <header className="max-w-4xl mx-auto px-5 sm:px-6 mb-10">
+        <div className="flex items-center gap-2 mb-3 text-[0.7rem] uppercase tracking-[0.2em] flex-wrap">
+          {isFinalized ? (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 normal-case tracking-normal text-[0.7rem]">
+              <ShieldCheck className="w-3 h-3" /> Sealed · Sent on-chain
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1.5">
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-ember opacity-75" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-ember" />
+              </span>
+              <span className="text-ink-300 font-medium">Gathering wishes · Sui Testnet</span>
+            </span>
+          )}
           {isFetching && (
             <span className="flex items-center gap-1 text-ink-400 normal-case tracking-normal">
               <Loader2 className="w-3 h-3 animate-spin" />
@@ -322,12 +345,22 @@ export default function PlanView({ planId }: { planId: string }) {
         <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-6">
           <div className="min-w-0">
             <h1 className="font-display text-4xl sm:text-5xl md:text-6xl font-medium text-ink-50 leading-[1.05]">
-              {planFields.title.replace(/^Birthday Surprise for /i, "")}{" "}
+              {displayTitle}{" "}
               <span className="italic text-gradient">birthday</span>
             </h1>
-            <p className="text-ink-400 text-xs mt-3 font-mono">
+            <p className="text-ink-400 text-xs mt-3 font-mono flex items-center gap-1.5">
+              <Crown className="w-3 h-3 text-sungold" />
               Started by {shortenAddress(planFields.creator)}
+              {isCreator && (
+                <span className="text-sungold normal-case tracking-normal ml-1">(you)</span>
+              )}
             </p>
+            {planFields.recipient && (
+              <p className="text-ink-400 text-xs mt-1.5 font-mono flex items-center gap-1.5">
+                <Gift className="w-3 h-3 text-ember" />
+                For {shortenAddress(planFields.recipient)}
+              </p>
+            )}
           </div>
 
           <div className="flex flex-wrap gap-2">
@@ -340,21 +373,17 @@ export default function PlanView({ planId }: { planId: string }) {
               Refresh
             </button>
             <button
-              onClick={handleCopy}
+              onClick={handleCopyLink}
               className="flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-gradient-celebration text-white text-xs font-semibold shadow-glow-rose transition-all hover:-translate-y-0.5"
             >
-              {copied ? (
-                <Check className="w-3.5 h-3.5" />
-              ) : (
-                <Copy className="w-3.5 h-3.5" />
-              )}
+              {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
               {copied ? "Copied" : "Copy invite link"}
             </button>
           </div>
         </div>
 
-        {/* Contributor strip + counts */}
-        <div className="mt-7 flex items-center gap-4 flex-wrap">
+        {/* Contributor strip */}
+        <div className="mt-6 flex items-center gap-4 flex-wrap">
           <div className="flex items-center -space-x-2">
             {contributors.slice(0, 6).map((addr, i) => (
               <span
@@ -375,14 +404,12 @@ export default function PlanView({ planId }: { planId: string }) {
             )}
           </div>
           <div className="flex items-center gap-2 text-xs text-ink-300">
-            <Users className="w-3.5 h-3.5" />
+            <MessageCircle className="w-3.5 h-3.5" />
             <span>
-              <span className="text-ink-50 font-medium">
-                {contributors.length}
-              </span>{" "}
+              <span className="text-ink-50 font-medium">{contributors.length}</span>{" "}
               {contributors.length === 1 ? "friend" : "friends"} ·{" "}
-              <span className="text-ink-50 font-medium">{ideaCount}</span>{" "}
-              {ideaCount === 1 ? "wish" : "wishes"} pinned
+              <span className="text-ink-50 font-medium">{wishCount}</span>{" "}
+              {wishCount === 1 ? "wish" : "wishes"} so far
             </span>
           </div>
         </div>
@@ -390,10 +417,53 @@ export default function PlanView({ planId }: { planId: string }) {
         <div className="divider-hairline mt-8" />
       </header>
 
-      {/* ── Ideas grid ── */}
+      {/* ── Final card hero (only when finalized) ── */}
+      {isFinalized && planFields.final_card_blob_id && (
+        <section className="max-w-4xl mx-auto px-5 sm:px-6 mb-16">
+          <div className="rounded-3xl glass-card overflow-hidden">
+            <div className="h-1 w-full bg-gradient-celebration" />
+            <div className="p-6 sm:p-8">
+              <div className="flex items-center gap-2 mb-4">
+                <Gift className="w-4 h-4 text-ember" />
+                <span className="eyebrow">The final card</span>
+              </div>
+              <img
+                src={walrusBlobUrl(planFields.final_card_blob_id)}
+                alt={`Birthday card for ${displayTitle}`}
+                className="w-full rounded-2xl border border-white/10 mb-5"
+              />
+              <div className="flex flex-wrap items-center justify-between gap-3 text-[0.72rem] text-ink-400 font-mono">
+                <span>
+                  Stored forever on Walrus ·{" "}
+                  <a
+                    href={walrusBlobUrl(planFields.final_card_blob_id)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-ink-200 hover:text-gradient transition-colors inline-flex items-center gap-1"
+                  >
+                    open blob <ExternalLink className="w-3 h-3" />
+                  </a>
+                </span>
+                <a
+                  href={`${config.sui.explorerUrl}/object/${planId}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hover:text-ink-200 inline-flex items-center gap-1"
+                >
+                  on Sui <ExternalLink className="w-3 h-3" />
+                </a>
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* ── Wishes wall ── */}
       <section className="max-w-4xl mx-auto px-5 sm:px-6 mb-16">
         <div className="flex items-baseline justify-between mb-6">
-          <p className="eyebrow">The card so far</p>
+          <p className="eyebrow">
+            {isFinalized ? "Wishes that made the card" : "Wishes so far"}
+          </p>
           <a
             href={`${config.sui.explorerUrl}/object/${planId}`}
             target="_blank"
@@ -405,43 +475,30 @@ export default function PlanView({ planId }: { planId: string }) {
           </a>
         </div>
 
-        {ideaCount === 0 ? (
+        {wishCount === 0 ? (
           <div className="rounded-3xl glass-card p-10 text-center">
             <Sparkles className="w-6 h-6 text-ember mx-auto mb-3" />
-            <p className="font-display text-2xl text-ink-50 mb-1">
-              Nothing here yet.
-            </p>
+            <p className="font-display text-2xl text-ink-50 mb-1">No wishes yet.</p>
             <p className="text-ink-400 text-sm max-w-sm mx-auto">
               Share the invite link with friends — the first wish kicks off the card.
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5">
-            {planFields.ideas.map((item, i) => (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {planFields.wishes.map((item, i) => (
               <article
                 key={i}
-                className="group relative rounded-2xl overflow-hidden glass-card"
+                className="rounded-2xl glass-card p-5 flex gap-3 items-start"
               >
-                <div className="relative aspect-square overflow-hidden bg-ink-800">
-                  <img
-                    src={walrusBlobUrl(item.fields.blob_id)}
-                    alt={item.fields.text}
-                    className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).style.display = "none";
-                    }}
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-ink-950/85 via-transparent to-transparent" />
-                  <span
-                    className={`absolute top-3 left-3 w-7 h-7 rounded-full border-2 border-ink-950 bg-gradient-to-br ${avatarGradient(
-                      item.fields.contributor
-                    )} flex items-center justify-center text-[0.6rem] font-mono text-white`}
-                  >
-                    {item.fields.contributor.slice(2, 4)}
-                  </span>
-                </div>
-                <div className="p-4 sm:p-5">
-                  <p className="text-ink-100 text-sm leading-relaxed mb-3">
+                <span
+                  className={`flex-shrink-0 w-9 h-9 rounded-full bg-gradient-to-br ${avatarGradient(
+                    item.fields.contributor
+                  )} flex items-center justify-center text-[0.7rem] font-mono text-white shadow-soft-card`}
+                >
+                  {item.fields.contributor.slice(2, 4)}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-ink-100 text-sm leading-relaxed mb-2 whitespace-pre-wrap break-words">
                     “{item.fields.text}”
                   </p>
                   <div className="flex items-center justify-between gap-2 text-[0.7rem]">
@@ -460,228 +517,216 @@ export default function PlanView({ planId }: { planId: string }) {
         )}
       </section>
 
-      {/* ── Add your wish ── */}
-      <section className="max-w-4xl mx-auto px-5 sm:px-6">
-        <div className="relative rounded-3xl glass-card overflow-hidden">
-          <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-celebration" />
+      {/* ── Add a wish (visible while not finalized) ── */}
+      {!isFinalized && (
+        <section className="max-w-4xl mx-auto px-5 sm:px-6 mb-12">
+          <div className="relative rounded-3xl glass-card overflow-hidden">
+            <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-celebration" />
+            <div className="p-6 sm:p-8">
+              <div className="flex items-center gap-2 mb-2">
+                <MessageCircle className="w-4 h-4 text-ember" />
+                <span className="eyebrow">Your wish</span>
+              </div>
+              <h2 className="font-display text-2xl sm:text-3xl text-ink-50 mb-2 leading-tight">
+                Add your <span className="italic text-gradient">wish</span>
+              </h2>
+              <p className="text-ink-300 text-sm mb-5 max-w-xl leading-relaxed">
+                Free to add — just gas. Your text is pinned to Sui forever and feeds
+                into the AI birthday card the creator will generate when everyone&apos;s in.
+              </p>
 
-          <div className="p-6 sm:p-10">
-            <div className="flex items-center gap-2 mb-2">
-              <ImagePlus className="w-4 h-4 text-ember" />
-              <span className="eyebrow">Your contribution</span>
-            </div>
-            <h2 className="font-display text-3xl sm:text-4xl text-ink-50 mb-2 leading-tight">
-              Add your <span className="italic text-gradient">wish</span>
-            </h2>
-            <p className="text-ink-300 text-sm mb-7 max-w-xl leading-relaxed">
-              Two signatures, one shared card. Pay <span className="text-ink-50 font-medium">{FEE_SUI} SUI</span> to unlock AI generation, review your collage, then pin it onto the chain for free.
-            </p>
+              <div className="mb-4">
+                <ConnectButton />
+              </div>
 
-            {/* Step indicator */}
-            <div className="mb-6 grid grid-cols-3 gap-2 sm:gap-3 text-[0.62rem] sm:text-[0.65rem] uppercase tracking-widest">
-              <Step
-                num={1}
-                shortLabel="Write"
-                label="Write idea"
-                active={!idea.trim() && !generatedImageUrl}
-                done={!!idea.trim() || !!generatedImageUrl}
-              />
-              <Step
-                num={2}
-                shortLabel="Pay & gen"
-                label="Pay & generate"
-                active={!!idea.trim() && !generatedImageUrl}
-                done={!!generatedImageUrl}
-              />
-              <Step
-                num={3}
-                shortLabel="Pin"
-                label="Pin on-chain"
-                active={!!generatedImageUrl}
-                done={false}
-              />
-            </div>
-
-            <div className="mb-5">
-              <ConnectButton />
-            </div>
-
-            <div className="space-y-4">
-              <textarea
-                value={idea}
-                onChange={(e) => setIdea(e.target.value)}
-                placeholder="E.g., A retro disco theme with a neon cake and glitter raining from the ceiling…"
-                disabled={!account || isWorking || isSaving}
-                className="input-dark h-32 resize-none disabled:opacity-40"
-              />
-
-              {/* Step 2: Pay & generate */}
-              {!generatedImageUrl && (
-                <>
-                  <button
-                    onClick={handlePayAndGenerate}
-                    disabled={isWorking || !idea.trim() || !account}
-                    className="btn-primary w-full"
-                  >
-                    {!account ? (
-                      <>
-                        <Wallet className="w-4 h-4" />
-                        Connect wallet to begin
-                      </>
-                    ) : isWorking ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        Working…
-                      </>
-                    ) : (
-                      <>
-                        <Wand2 className="w-4 h-4" />
-                        Pay {FEE_SUI} SUI & generate collage
-                      </>
-                    )}
-                  </button>
-
-                  {/* Preview of what's next so users see the full flow before paying */}
-                  <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.015] p-4 flex items-center gap-3">
-                    <span className="flex-shrink-0 w-8 h-8 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-ink-400 text-xs font-mono">
-                      3
+              <div className="space-y-4">
+                <textarea
+                  value={wishText}
+                  onChange={(e) => setWishText(e.target.value)}
+                  placeholder="E.g., Happy 30th Maria! Wishing you a year of disco nights and surprise cakes…"
+                  disabled={!account || isAddingWish}
+                  maxLength={280}
+                  className="input-dark h-28 resize-none disabled:opacity-40"
+                />
+                <div className="flex items-center justify-between text-[0.7rem] text-ink-400">
+                  <span>{wishText.length}/280</span>
+                  {!account && (
+                    <span className="flex items-center gap-1">
+                      <Wallet className="w-3 h-3" />
+                      Connect a wallet to sign
                     </span>
-                    <div className="min-w-0">
-                      <p className="text-ink-100 text-sm font-medium leading-tight mb-0.5">
-                        Next: pin your collage to the card
-                      </p>
-                      <p className="text-ink-400 text-xs leading-snug">
-                        After generation, the <span className="text-ink-200">Pin to the card</span> button appears here — one final free signature stores your wish on-chain.
-                      </p>
-                    </div>
-                  </div>
-                </>
-              )}
-
-              {/* Step 3: review + pin */}
-              {generatedImageUrl && (
-                <div className="space-y-3 pt-2">
-                  <div className="relative rounded-2xl overflow-hidden border border-white/10">
-                    <img
-                      src={generatedImageUrl}
-                      alt="AI generated birthday collage"
-                      className="w-full"
-                    />
-                  </div>
-
-                  <div className="flex flex-col sm:flex-row gap-2">
-                    <button
-                      onClick={handleRegenerate}
-                      disabled={isWorking || isSaving}
-                      className="btn-secondary sm:flex-1"
-                      title="Use the same payment receipt to spin a new image"
-                    >
-                      {isWorking ? (
-                        <>
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                          Regenerating…
-                        </>
-                      ) : (
-                        <>
-                          <RefreshCw className="w-4 h-4" />
-                          Regenerate
-                        </>
-                      )}
-                    </button>
-                    <button
-                      onClick={handlePinToCard}
-                      disabled={isSaving || isWorking || !account}
-                      className="btn-primary sm:flex-[2]"
-                    >
-                      {isSaving ? (
-                        <>
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                          Pinning…
-                        </>
-                      ) : (
-                        <>
-                          <ShieldCheck className="w-4 h-4" />
-                          Pin to the card
-                        </>
-                      )}
-                    </button>
-                  </div>
-
-                  <p className="text-center text-ink-400 text-[0.72rem] tracking-wide">
-                    Pinning is free — costs only Sui gas + Walrus storage
-                  </p>
+                  )}
                 </div>
-              )}
 
-              {status && (
-                <p
-                  className={`text-center text-xs font-mono px-4 py-3 rounded-xl break-all leading-relaxed border ${
-                    statusKind === "error"
-                      ? "border-rosegold/30 bg-rosegold/[0.06] text-rosegold"
-                      : statusKind === "success"
-                      ? "border-emerald-500/20 bg-emerald-500/[0.05] text-emerald-300"
-                      : "border-white/10 bg-white/[0.03] text-ink-200"
-                  }`}
+                <button
+                  onClick={handleAddWish}
+                  disabled={isAddingWish || !wishText.trim() || !account}
+                  className="btn-primary w-full"
                 >
-                  {status}
-                </p>
-              )}
+                  {!account ? (
+                    <>
+                      <Wallet className="w-4 h-4" />
+                      Connect wallet to add your wish
+                    </>
+                  ) : isAddingWish ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Signing…
+                    </>
+                  ) : (
+                    <>
+                      <Send className="w-4 h-4" />
+                      Add my wish to the card
+                    </>
+                  )}
+                </button>
 
-              {paymentDigest && !generatedImageUrl && (
-                <a
-                  href={`${config.sui.explorerUrl}/tx/${paymentDigest}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center justify-center gap-1.5 text-[0.7rem] text-ink-400 hover:text-ink-200 transition-colors font-mono"
+                {wishStatus && (
+                  <p
+                    className={`text-center text-xs font-mono px-4 py-3 rounded-xl break-all leading-relaxed border ${
+                      wishStatusKind === "error"
+                        ? "border-rosegold/30 bg-rosegold/[0.06] text-rosegold"
+                        : wishStatusKind === "success"
+                        ? "border-emerald-500/20 bg-emerald-500/[0.05] text-emerald-300"
+                        : "border-white/10 bg-white/[0.03] text-ink-200"
+                    }`}
+                  >
+                    {wishStatus}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* ── Finalize panel (creator-only, while not finalized) ── */}
+      {isCreator && !isFinalized && (
+        <section className="max-w-4xl mx-auto px-5 sm:px-6">
+          <div className="rounded-3xl border border-sungold/25 bg-sungold/[0.04] overflow-hidden">
+            <div className="p-6 sm:p-8">
+              <div className="flex items-center gap-2 mb-2">
+                <Crown className="w-4 h-4 text-sungold" />
+                <span className="eyebrow text-sungold">Creator only</span>
+              </div>
+              <h2 className="font-display text-2xl sm:text-3xl text-ink-50 mb-2 leading-tight">
+                Seal &amp; send the <span className="italic text-gradient">card</span>
+              </h2>
+              <p className="text-ink-300 text-sm mb-5 max-w-xl leading-relaxed">
+                When everyone&apos;s wishes are in, pay {FEE_SUI} SUI to generate
+                one AI birthday card from all {wishCount} {wishCount === 1 ? "wish" : "wishes"}.
+                The card is pinned to Walrus and the plan is addressed to the
+                recipient on-chain.
+              </p>
+
+              {!showFinalize ? (
+                <button
+                  onClick={() => setShowFinalize(true)}
+                  disabled={wishCount === 0}
+                  className="btn-primary"
                 >
-                  <ExternalLink className="w-3 h-3" />
-                  Payment receipt · {paymentDigest.slice(0, 10)}…{paymentDigest.slice(-6)}
-                </a>
+                  <Wand2 className="w-4 h-4" />
+                  Finalize the card
+                </button>
+              ) : (
+                <div className="space-y-5">
+                  <div>
+                    <label className="block text-xs uppercase tracking-widest text-ink-400 font-medium mb-2">
+                      Recipient&apos;s Sui address
+                    </label>
+                    <input
+                      type="text"
+                      value={recipient}
+                      onChange={(e) => {
+                        setRecipient(e.target.value);
+                        setFinalizeError("");
+                      }}
+                      placeholder="0x…"
+                      disabled={finalizeStep !== "idle" && finalizeStep !== "preview"}
+                      className="input-dark text-sm font-mono"
+                    />
+                    <p className="text-[0.7rem] text-ink-400 mt-1.5">
+                      Stored on-chain so anyone reading the plan knows who it&apos;s for.
+                    </p>
+                  </div>
+
+                  {finalizeStep === "idle" && (
+                    <button
+                      onClick={handlePayAndGenerate}
+                      disabled={!recipient.trim() || wishCount === 0}
+                      className="btn-primary w-full"
+                    >
+                      <Wand2 className="w-4 h-4" />
+                      Pay {FEE_SUI} SUI &amp; generate the card
+                    </button>
+                  )}
+
+                  {finalizeStep === "paying" && (
+                    <div className="flex items-center justify-center gap-2 text-sm text-ink-200 py-3 bg-white/[0.03] rounded-xl border border-white/10">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Confirm {FEE_SUI} SUI in your wallet…
+                    </div>
+                  )}
+
+                  {finalizeStep === "generating" && (
+                    <div className="flex items-center justify-center gap-2 text-sm text-ink-200 py-3 bg-white/[0.03] rounded-xl border border-white/10">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Generating your card &amp; pinning to Walrus…
+                    </div>
+                  )}
+
+                  {finalizeStep === "preview" && generatedPreview && (
+                    <div className="space-y-3">
+                      <div className="rounded-2xl overflow-hidden border border-white/10">
+                        <img
+                          src={generatedPreview}
+                          alt="Generated birthday card preview"
+                          className="w-full"
+                        />
+                      </div>
+                      <p className="text-center text-ink-400 text-[0.72rem] tracking-wide">
+                        Stored on Walrus · sign the final transaction to seal it on Sui
+                      </p>
+                      <button
+                        onClick={handleSealCard}
+                        className="btn-primary w-full"
+                      >
+                        <ShieldCheck className="w-4 h-4" />
+                        Seal &amp; send to {shortenAddress(recipient)}
+                      </button>
+                    </div>
+                  )}
+
+                  {finalizeStep === "sealing" && (
+                    <div className="flex items-center justify-center gap-2 text-sm text-ink-200 py-3 bg-white/[0.03] rounded-xl border border-white/10">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Sealing on Sui…
+                    </div>
+                  )}
+
+                  {finalizeError && (
+                    <p className="text-center text-xs font-mono px-4 py-3 rounded-xl break-all leading-relaxed border border-rosegold/30 bg-rosegold/[0.06] text-rosegold">
+                      {finalizeError}
+                    </p>
+                  )}
+
+                  {paymentDigest && finalizeStep !== "idle" && (
+                    <a
+                      href={`${config.sui.explorerUrl}/tx/${paymentDigest}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center justify-center gap-1.5 text-[0.7rem] text-ink-400 hover:text-ink-200 transition-colors font-mono"
+                    >
+                      <ExternalLink className="w-3 h-3" />
+                      Payment receipt · {paymentDigest.slice(0, 10)}…{paymentDigest.slice(-6)}
+                    </a>
+                  )}
+                </div>
               )}
             </div>
           </div>
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function Step({
-  num,
-  shortLabel,
-  label,
-  active,
-  done,
-}: {
-  num: number;
-  shortLabel: string;
-  label: string;
-  active: boolean;
-  done: boolean;
-}) {
-  return (
-    <div
-      className={`flex items-center gap-2 px-2.5 sm:px-3 py-2 rounded-xl border transition-colors min-w-0 ${
-        done
-          ? "border-emerald-500/30 bg-emerald-500/[0.06] text-emerald-300"
-          : active
-          ? "border-ember/40 bg-ember/[0.06] text-ember-glow"
-          : "border-white/10 bg-white/[0.02] text-ink-400"
-      }`}
-    >
-      <span
-        className={`flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-[0.65rem] font-bold ${
-          done
-            ? "bg-emerald-500/30 text-emerald-300"
-            : active
-            ? "bg-gradient-celebration text-white"
-            : "bg-white/5 text-ink-400"
-        }`}
-      >
-        {done ? <Check className="w-3 h-3" /> : num}
-      </span>
-      <span className="truncate sm:hidden">{shortLabel}</span>
-      <span className="hidden sm:inline truncate">{label}</span>
+        </section>
+      )}
     </div>
   );
 }

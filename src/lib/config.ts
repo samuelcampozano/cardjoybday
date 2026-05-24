@@ -91,7 +91,8 @@ export const config = Object.freeze({
     explorerUrl: `https://suiscan.xyz/${network}`,
     moveTargets: Object.freeze({
       createPlan: `${packageId}::surprise_planner::create_plan` as const,
-      addIdea: `${packageId}::surprise_planner::add_idea` as const,
+      addWish: `${packageId}::surprise_planner::add_wish` as const,
+      finalizeCard: `${packageId}::surprise_planner::finalize_card` as const,
     }),
   }),
   walrus: Object.freeze({

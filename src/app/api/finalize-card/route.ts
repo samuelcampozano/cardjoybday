@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { SuiJsonRpcClient } from "@mysten/sui/jsonRpc";
 import { config } from "@/lib/config";
+import { uploadToWalrus, walrusBlobUrl } from "@/lib/walrus";
 
 export const maxDuration = 60;
 
@@ -11,8 +12,6 @@ const sui = new SuiJsonRpcClient({
   network: config.sui.network,
 });
 
-// In-memory replay protection — fine for a single Cloud Run instance,
-// swap for a shared store (Redis, KV) if the deployment ever scales horizontally.
 const usedDigests = new Set<string>();
 function recordDigest(d: string) {
   usedDigests.add(d);
@@ -74,16 +73,49 @@ async function verifyPayment(
   return { ok: true };
 }
 
-export async function POST(req: Request) {
-  try {
-    const { prompt, paymentDigest } = await req.json();
+function buildCompositePrompt(planTitle: string, wishes: string[]): string {
+  const cleaned = wishes
+    .map((w) => w.trim())
+    .filter(Boolean)
+    .slice(0, 8)
+    .map((w) => (w.length > 100 ? w.slice(0, 100) + "…" : w));
 
-    if (!prompt || typeof prompt !== "string") {
-      return NextResponse.json({ error: "Prompt is required" }, { status: 400 });
+  const wishesLine =
+    cleaned.length > 0
+      ? `Inspired by friends' wishes: ${cleaned.join(" · ")}.`
+      : "";
+
+  return (
+    `Vibrant collaborative birthday card collage celebrating "${planTitle}". ` +
+    wishesLine +
+    ` Birthday cake with lit candles, balloons, confetti, streamers, ` +
+    `warm festive colors, joyful party atmosphere, painterly composition, ` +
+    `high quality digital art.`
+  );
+}
+
+export async function POST(req: Request) {
+  let paymentDigest: string | undefined;
+  try {
+    const body = (await req.json()) as {
+      planTitle?: string;
+      wishes?: string[];
+      paymentDigest?: string;
+    };
+
+    const planTitle = (body.planTitle ?? "").trim();
+    const wishes = Array.isArray(body.wishes) ? body.wishes : [];
+    paymentDigest = body.paymentDigest;
+
+    if (!planTitle) {
+      return NextResponse.json(
+        { error: "Plan title is required." },
+        { status: 400 }
+      );
     }
     if (!paymentDigest || typeof paymentDigest !== "string") {
       return NextResponse.json(
-        { error: "Payment receipt required to unlock generation." },
+        { error: "Payment receipt required to finalize the card." },
         { status: 402 }
       );
     }
@@ -93,35 +125,35 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: v.reason }, { status: 402 });
     }
 
-    // Mark used BEFORE generation so concurrent requests can't both pass.
     recordDigest(paymentDigest);
 
-    const fullPrompt =
-      `Vibrant birthday celebration collage illustration: ${prompt}. ` +
-      `Colorful balloons, confetti, birthday cake with lit candles, streamers, ` +
-      `joyful party atmosphere, warm festive colors, high quality digital art.`;
-
+    const prompt = buildCompositePrompt(planTitle, wishes);
     const seed = Math.floor(Math.random() * 1_000_000_000);
-    const encodedPrompt = encodeURIComponent(fullPrompt);
+    const url =
+      `${POLLINATIONS_URL}/${encodeURIComponent(prompt)}` +
+      `?model=flux&width=1024&height=1024&nologo=true&seed=${seed}`;
 
-    const imageRes = await fetch(
-      `${POLLINATIONS_URL}/${encodedPrompt}?model=flux-schnell&width=1024&height=1024&nologo=true&seed=${seed}`,
-      { signal: AbortSignal.timeout(55_000) }
-    );
-
+    const imageRes = await fetch(url, { signal: AbortSignal.timeout(55_000) });
     if (!imageRes.ok) {
-      // Restore receipt so the user can retry without paying again.
       unrecordDigest(paymentDigest);
-      throw new Error(`Pollinations API error: HTTP ${imageRes.status}`);
+      return NextResponse.json(
+        { error: `Image generation failed (HTTP ${imageRes.status}).` },
+        { status: 502 }
+      );
     }
 
-    const imageBuffer = await imageRes.arrayBuffer();
-    const base64 = Buffer.from(imageBuffer).toString("base64");
-    return NextResponse.json({ imageUrl: `data:image/jpeg;base64,${base64}` });
+    const imageBlob = await imageRes.blob();
+    const blobId = await uploadToWalrus(imageBlob);
+
+    return NextResponse.json({
+      blobId,
+      imageUrl: walrusBlobUrl(blobId),
+    });
   } catch (error: any) {
-    console.error("Image generation error:", error);
+    if (paymentDigest) unrecordDigest(paymentDigest);
+    console.error("finalize-card error:", error);
     return NextResponse.json(
-      { error: error.message ?? "Failed to generate image" },
+      { error: error?.message ?? "Failed to finalize card" },
       { status: 500 }
     );
   }

@@ -2,7 +2,29 @@
 # This file should be checked in.
 
 [move]
-version = 4
+version = 3
+manifest_digest = "F3DE2E9AA8FE52DEB9D892DC9CCB221AB30CA1E8133AF4306907F3A379B488B6"
+deps_digest = "F8BBB0CCB2491CA29A3DF03D6F92277A4F3574266507ACD77214D37ECA3F3082"
+dependencies = [
+  { id = "Sui", name = "Sui" },
+]
+
+[[move.package]]
+id = "MoveStdlib"
+source = { git = "https://github.com/MystenLabs/sui.git", rev = "mainnet-v1.60.1", subdir = "crates\\sui-framework\\packages\\move-stdlib" }
+
+[[move.package]]
+id = "Sui"
+source = { git = "https://github.com/MystenLabs/sui.git", rev = "mainnet-v1.60.1", subdir = "crates/sui-framework/packages/sui-framework" }
+
+dependencies = [
+  { id = "MoveStdlib", name = "MoveStdlib" },
+]
+
+[move.toolchain-version]
+compiler-version = "1.60.0"
+edition = "2024.beta"
+flavor = "sui"
 
 [pinned.testnet.MoveStdlib]
 source = { git = "https://github.com/MystenLabs/sui.git", subdir = 'crates\sui-framework\packages\move-stdlib', rev = "85b460a63fd76a15672bbe4820bde6db78a3cfb8" }

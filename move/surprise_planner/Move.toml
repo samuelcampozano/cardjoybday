@@ -3,7 +3,7 @@ name = "surprise_planner"
 edition = "2024.beta" # using 2024 edition
 
 [dependencies]
-Sui = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/sui-framework", rev = "testnet" }
+Sui = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/sui-framework", rev = "mainnet-v1.60.1" }
 
 [addresses]
 surprise_planner = "0x0"

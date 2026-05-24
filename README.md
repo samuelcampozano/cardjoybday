@@ -15,21 +15,24 @@
 
 ## What it is
 
-A collaborative birthday-card builder where friends sign their wishes onto the **Sui blockchain** and AI-generated collages are stored permanently on **Walrus**. One person spins up a shared plan, sends a single invite link, and everyone who joins pins a wish to the same on-chain card.
+A collaborative birthday-card builder. One person spins up a shared plan on **Sui**, sends a single invite link, and everyone signs their text wishes onto the same on-chain object — **free**, just gas. When everyone is in, the creator pays a one-time fee, the server generates a single AI birthday card from all the wishes, the image is pinned to **Walrus** forever, and the plan is sealed and addressed to the birthday person on-chain.
 
 Built for the **Sui Overflow 2026 Hackathon · Entertainment & Culture track**.
 
 ## The flow
 
 ```
-1. Creator   →  signs create_plan         →  gets /plan/<id> invite link
-2. Friend    →  opens the link
-3. Friend    →  writes a wish
-4. Friend    →  signs 0.01 SUI payment    →  unlocks AI generation
-5. Server    →  verifies the payment on-chain  →  calls FLUX via Pollinations
-6. Friend    →  reviews the collage       →  signs add_idea on Sui
-7. Image     →  pinned on Walrus, referenced from the shared object
-8. Everyone  →  sees wishes appear live (auto-polled every 12s)
+1. Creator  →  signs create_plan                  →  gets /plan/<id> invite link
+2. Friends  →  open the link, write a wish        →  sign add_wish (free, just gas)
+3. Creator  →  reviews the wish wall, picks the   →  signs 0.01 SUI payment
+              recipient's wallet address
+4. Server   →  verifies payment on-chain          →  builds composite prompt
+            →  generates the card image           →  uploads to Walrus
+            →  returns the blob ID
+5. Creator  →  reviews the card preview           →  signs finalize_card on Sui
+            (recipient + blob ID on-chain forever)
+6. Birthday →  opens the same /plan/<id> link     →  sees the sealed card +
+   person      shared with them                      every wish
 ```
 
 ## Tech stack
@@ -48,8 +51,9 @@ Built for the **Sui Overflow 2026 Hackathon · Entertainment & Culture track**.
 | | |
 |---|---|
 | Network | Sui Testnet (`chain_id 4c78adac`) |
-| Package | [`0x540a…2dfb`](https://suiscan.xyz/testnet/object/0x540aff44e9079f4d94c57cc71e4b133085e2f86f0a5464f36ce11be47baf2dfb) |
+| Package | [`0x01d4…a3d9`](https://suiscan.xyz/testnet/object/0x01d4cb537283a740ddc9d9fa7c82a30baad22442dd41e109d8da0f2e0501a3d9) |
 | Move source | [`move/surprise_planner/sources/surprise_planner.move`](./move/surprise_planner/sources/surprise_planner.move) |
+| Entry functions | `create_plan(title)` · `add_wish(plan, text)` · `finalize_card(plan, blob_id, recipient)` |
 
 > Sui testnet is occasionally reset. If the package ID above stops resolving, see [Smart-contract redeploy](#smart-contract-redeploy) below.
 
@@ -106,11 +110,12 @@ gcloud builds submit --config=cloudbuild.yaml \
 When testnet resets (or when you publish a new version of the Move package):
 
 ```bash
-cd move/surprise_planner
-sui client publish --gas-budget 100000000
+node scripts/publish-move.mjs
 ```
 
-Copy the new package ID, then redeploy with one command — no source edits:
+The script uses the Sui TypeScript SDK directly (sidesteps a Windows file-lock bug in `sui client publish`), prints the new PACKAGE_ID, and tells you exactly what to update.
+
+Then one command rebuilds + redeploys with the new ID, no source edits:
 
 ```bash
 gcloud builds submit --config=cloudbuild.yaml \
@@ -124,7 +129,8 @@ For local development, also update `NEXT_PUBLIC_CARDJOY_PACKAGE_ID` in `.env.loc
 ```
 src/
   app/
-    api/generate-collage/   # POST: verifies Sui payment, calls Pollinations
+    api/finalize-card/      # POST: verifies creator payment, generates AI card,
+                            #       uploads to Walrus, returns blob ID
     plan/[planId]/          # Dynamic plan page
     layout.tsx, page.tsx, providers.tsx, globals.css
   components/
@@ -135,6 +141,8 @@ src/
     walrus.ts               # Walrus upload / blob URL helper
 move/
   surprise_planner/         # Sui Move package (sources, Move.toml, Move.lock)
+scripts/
+  publish-move.mjs          # SDK-based Move publish (workaround for CLI bug)
 Dockerfile                  # Multi-stage Next.js standalone build
 cloudbuild.yaml             # Build → push → deploy pipeline
 ```

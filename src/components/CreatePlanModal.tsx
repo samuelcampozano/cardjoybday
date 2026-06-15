@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ConnectButton,
@@ -37,6 +37,52 @@ export default function CreatePlanModal({ onClose }: Props) {
   const [copiedId, setCopiedId] = useState(false);
   const [status, setStatus] = useState("");
   const [isCreating, setIsCreating] = useState(false);
+  const [recentPlan, setRecentPlan] = useState<{
+    id: string;
+    link: string;
+    title: string;
+    createdAt: number;
+  } | null>(null);
+
+  // Closing the modal mid-transaction or after success would lose the
+  // invite link. Allow backdrop close ONLY when the user hasn't started
+  // anything yet — the X button always works.
+  const canCloseFromBackdrop = !isCreating && !planLink && !status;
+
+  // Load any previously created plan from localStorage so it's still
+  // reachable if the modal was dismissed accidentally last time.
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem("cardjoy:last-plan");
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (parsed?.id && parsed?.link) setRecentPlan(parsed);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  // Persist a successful create so backdrop-close (or any later crash)
+  // can never lose the link.
+  useEffect(() => {
+    if (!planId || !planLink) return;
+    try {
+      window.localStorage.setItem(
+        "cardjoy:last-plan",
+        JSON.stringify({
+          id: planId,
+          link: planLink,
+          title: birthdayPerson
+            ? `Birthday Surprise for ${birthdayPerson}`
+            : "Birthday Surprise",
+          digest: txDigest,
+          createdAt: Date.now(),
+        })
+      );
+    } catch {
+      /* ignore */
+    }
+  }, [planId, planLink, txDigest, birthdayPerson]);
 
   const handleCreate = () => {
     if (!birthdayPerson.trim() || !account) return;
@@ -121,7 +167,7 @@ export default function CreatePlanModal({ onClose }: Props) {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        onClick={onClose}
+        onClick={canCloseFromBackdrop ? onClose : undefined}
         className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center bg-black/70 backdrop-blur-sm p-0 sm:p-4"
       >
         <motion.div
@@ -155,6 +201,33 @@ export default function CreatePlanModal({ onClose }: Props) {
               We&apos;ll mint a shared plan on Sui and give you one link to send
               the whole group.
             </p>
+
+            {/* ── Recovery: prior plan from localStorage ── */}
+            {recentPlan && !planLink && !status && !isCreating && (
+              <div className="mb-5 rounded-2xl border border-sungold/25 bg-sungold/[0.05] p-3.5">
+                <p className="text-[0.65rem] uppercase tracking-[0.18em] text-sungold font-medium mb-1">
+                  Your last plan
+                </p>
+                <p className="text-sm text-ink-100 font-medium leading-tight mb-1.5 truncate">
+                  {recentPlan.title}
+                </p>
+                <div className="flex items-center gap-2">
+                  <a
+                    href={recentPlan.link}
+                    className="flex-1 text-[0.72rem] font-mono text-ink-300 hover:text-ink-100 transition-colors truncate"
+                  >
+                    {recentPlan.link.replace(/^https?:\/\//, "")}
+                  </a>
+                  <a
+                    href={recentPlan.link}
+                    className="flex-shrink-0 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-gradient-celebration text-white text-[0.7rem] font-semibold shadow-glow-rose hover:-translate-y-0.5 transition-transform"
+                  >
+                    Open
+                    <ArrowRight className="w-3 h-3" />
+                  </a>
+                </div>
+              </div>
+            )}
 
             {/* ── Form ── */}
             {!planLink && !status && (

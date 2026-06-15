@@ -12,7 +12,7 @@ substitutions:
   _SUI_NETWORK: "testnet"
   _SUI_RPC_URL: "https://fullnode.testnet.sui.io:443"
   _PACKAGE_ID: "0x01d4cb537283a740ddc9d9fa7c82a30baad22442dd41e109d8da0f2e0501a3d9"
-  _TREASURY: "0xf64afb55d7f67645d7542ab066a43b17f309c53c4d083dab1af7629b5007f413"
+  _TREASURY: "0xe20a2d411c71f459bb53a57c5c4826c0fde97868ee2ae1cfc0954a9bb5c54957"
   _FEE_MIST: "10000000"
   _WALRUS_PUB: "https://publisher.walrus-testnet.walrus.space"
   _WALRUS_AGG: "https://aggregator.walrus-testnet.walrus.space"

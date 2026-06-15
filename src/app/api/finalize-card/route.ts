@@ -133,11 +133,28 @@ export async function POST(req: Request) {
       `${POLLINATIONS_URL}/${encodeURIComponent(prompt)}` +
       `?model=flux&width=1024&height=1024&nologo=true&seed=${seed}`;
 
-    const imageRes = await fetch(url, { signal: AbortSignal.timeout(55_000) });
+    // Pollinations now requires a token for cloud/shared-IP traffic.
+    // Token is server-only — never expose to the client bundle.
+    const pollinationsToken = process.env.POLLINATIONS_TOKEN?.trim();
+    const headers: Record<string, string> = {};
+    if (pollinationsToken) {
+      headers["Authorization"] = `Bearer ${pollinationsToken}`;
+    }
+
+    const imageRes = await fetch(url, {
+      headers,
+      signal: AbortSignal.timeout(55_000),
+    });
     if (!imageRes.ok) {
       unrecordDigest(paymentDigest);
+      const hint =
+        imageRes.status === 402 && !pollinationsToken
+          ? " (server is missing POLLINATIONS_TOKEN — get one at https://enter.pollinations.ai)"
+          : imageRes.status === 402
+          ? " (the configured POLLINATIONS_TOKEN may be invalid or out of credit)"
+          : "";
       return NextResponse.json(
-        { error: `Image generation failed (HTTP ${imageRes.status}).` },
+        { error: `Image generation failed (HTTP ${imageRes.status})${hint}.` },
         { status: 502 }
       );
     }

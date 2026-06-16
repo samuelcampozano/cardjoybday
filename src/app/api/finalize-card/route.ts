@@ -5,7 +5,10 @@ import { uploadToWalrus, walrusBlobUrl } from "@/lib/walrus";
 
 export const maxDuration = 60;
 
-const POLLINATIONS_URL = "https://image.pollinations.ai/prompt";
+// Hugging Face Inference (the old api-inference.huggingface.co host is
+// deprecated; the new router has FLUX-schnell with a free tier).
+const HF_MODEL = "black-forest-labs/FLUX.1-schnell";
+const HF_URL = `https://router.huggingface.co/hf-inference/models/${HF_MODEL}`;
 
 const sui = new SuiJsonRpcClient({
   url: config.sui.rpcUrl,
@@ -128,31 +131,50 @@ export async function POST(req: Request) {
     recordDigest(paymentDigest);
 
     const prompt = buildCompositePrompt(planTitle, wishes);
-    const seed = Math.floor(Math.random() * 1_000_000_000);
-    const url =
-      `${POLLINATIONS_URL}/${encodeURIComponent(prompt)}` +
-      `?model=flux&width=1024&height=1024&nologo=true&seed=${seed}`;
 
-    // Pollinations now requires a token for cloud/shared-IP traffic.
-    // Token is server-only — never expose to the client bundle.
-    const pollinationsToken = process.env.POLLINATIONS_TOKEN?.trim();
-    const headers: Record<string, string> = {};
-    if (pollinationsToken) {
-      headers["Authorization"] = `Bearer ${pollinationsToken}`;
+    const hfToken = process.env.HUGGINGFACE_API_KEY?.trim();
+    if (!hfToken) {
+      unrecordDigest(paymentDigest);
+      return NextResponse.json(
+        {
+          error:
+            "Image generation is not configured. Server is missing HUGGINGFACE_API_KEY.",
+        },
+        { status: 500 }
+      );
     }
 
-    const imageRes = await fetch(url, {
-      headers,
+    const imageRes = await fetch(HF_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${hfToken}`,
+        "Content-Type": "application/json",
+        Accept: "image/jpeg",
+      },
+      body: JSON.stringify({
+        inputs: prompt,
+        parameters: {
+          width: 1024,
+          height: 1024,
+          num_inference_steps: 4,
+          guidance_scale: 0,
+        },
+      }),
       signal: AbortSignal.timeout(55_000),
     });
+
     if (!imageRes.ok) {
       unrecordDigest(paymentDigest);
+      const bodyText = await imageRes.text().catch(() => "");
       const hint =
-        imageRes.status === 402 && !pollinationsToken
-          ? " (server is missing POLLINATIONS_TOKEN — get one at https://enter.pollinations.ai)"
-          : imageRes.status === 402
-          ? " (the configured POLLINATIONS_TOKEN may be invalid or out of credit)"
+        imageRes.status === 401
+          ? " (HUGGINGFACE_API_KEY may be invalid)"
+          : imageRes.status === 402 || imageRes.status === 429
+          ? " (rate limit or free-tier quota hit; try again in a few minutes)"
+          : imageRes.status === 503
+          ? " (model is loading on Hugging Face — retry in 20s)"
           : "";
+      console.error("HF inference failed:", imageRes.status, bodyText.slice(0, 200));
       return NextResponse.json(
         { error: `Image generation failed (HTTP ${imageRes.status})${hint}.` },
         { status: 502 }

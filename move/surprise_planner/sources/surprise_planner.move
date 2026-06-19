@@ -1,9 +1,5 @@
 module surprise_planner::surprise_planner {
-    use sui::tx_context::{Self, TxContext};
-    use sui::object::{Self, UID, ID};
-    use sui::transfer;
     use std::string::String;
-    use std::option::{Self, Option};
     use sui::event;
 
     const ENotCreator: u64 = 0;
@@ -41,7 +37,7 @@ module surprise_planner::surprise_planner {
         blob_id: String,
     }
 
-    public entry fun create_plan(title: String, ctx: &mut TxContext) {
+    entry fun create_plan(title: String, ctx: &mut TxContext) {
         let creator = tx_context::sender(ctx);
         let plan = SurprisePlan {
             id: object::new(ctx),
@@ -57,10 +53,10 @@ module surprise_planner::surprise_planner {
         transfer::share_object(plan);
     }
 
-    public entry fun add_wish(
+    entry fun add_wish(
         plan: &mut SurprisePlan,
         text: String,
-        ctx: &mut TxContext
+        ctx: &TxContext
     ) {
         assert!(!plan.is_finalized, ENotEditable);
         let contributor = tx_context::sender(ctx);
@@ -71,11 +67,11 @@ module surprise_planner::surprise_planner {
         });
     }
 
-    public entry fun finalize_card(
+    entry fun finalize_card(
         plan: &mut SurprisePlan,
         blob_id: String,
         recipient: address,
-        ctx: &mut TxContext
+        ctx: &TxContext
     ) {
         assert!(tx_context::sender(ctx) == plan.creator, ENotCreator);
         assert!(!plan.is_finalized, EAlreadyFinalized);

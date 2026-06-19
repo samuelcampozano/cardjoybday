@@ -13,8 +13,8 @@ const steps = [
   },
   {
     n: "02",
-    title: "Friends drop ideas",
-    body: "Each contributor writes a wish, generates a free AI collage from it, and signs it into the plan — permanently stored on Walrus.",
+    title: "Friends drop wishes",
+    body: "Each contributor writes a personal wish and signs it directly into the Sui plan. Adding a wish is free — friends only pay minimal network gas.",
     icon: ImageIcon,
     accent: "from-rosegold to-iris",
   },

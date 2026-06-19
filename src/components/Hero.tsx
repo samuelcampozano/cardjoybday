@@ -63,9 +63,9 @@ export default function Hero({ onCreateClick, onJoinClick }: Props) {
           className="mt-7 sm:mt-8 max-w-2xl mx-auto text-center text-base sm:text-lg text-ink-300 leading-relaxed px-2"
         >
           Spin up a shared surprise plan, invite the whole group, and let
-          everyone drop an AI-generated collage — stored permanently on{" "}
-          <span className="text-ink-50">Walrus</span> and signed onto{" "}
-          <span className="text-ink-50">Sui</span>.
+          everyone sign their birthday wishes directly onto{" "}
+          <span className="text-ink-50">Sui</span>, before sealing the final
+          AI card forever on <span className="text-ink-50">Walrus</span>.
         </motion.p>
 
         {/* CTAs */}

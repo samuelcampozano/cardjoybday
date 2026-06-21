@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Navbar from "@/components/Navbar";
 import Hero from "@/components/Hero";
+import UserHistory from "@/components/UserHistory";
 import HowItWorks from "@/components/HowItWorks";
 import TechShowcase from "@/components/TechShowcase";
 import Footer from "@/components/Footer";
@@ -20,6 +21,7 @@ export default function Home() {
         onCreateClick={() => setShowCreate(true)}
         onJoinClick={() => setShowJoin(true)}
       />
+      <UserHistory />
       <HowItWorks />
       <TechShowcase />
       <Footer />

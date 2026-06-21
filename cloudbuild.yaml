@@ -15,7 +15,7 @@ substitutions:
   _TREASURY: "0xe20a2d411c71f459bb53a57c5c4826c0fde97868ee2ae1cfc0954a9bb5c54957"
   _FEE_MIST: "10000000"
   _WALRUS_PUB: "https://publisher.walrus-testnet.walrus.space"
-  _WALRUS_AGG: "https://aggregator.walrus-testnet.walrus.space"
+  _WALRUS_AGG: "https://walrus-testnet.blockscope.net"
 
 steps:
   - id: build
